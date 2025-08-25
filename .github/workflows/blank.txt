@@ -1,6 +1,4 @@
-# AI_Brain.gd
 extends Node
-
 class_name AI_Brain
 
 @export var input_size: int = 3
@@ -8,15 +6,28 @@ class_name AI_Brain
 @export var layer_sizes: Array = [4, 4] # hidden layers
 @export var algorithm: String = "simple" # only 'simple' for now
 
-# Neural network weights and biases
 var weights: Array = []
 var biases: Array = []
 
+# File path for saving/loading the model
+const MODEL_FILE_PATH := "res://model_save.json"
+
+# Inputs
+var input_array: Array = []
+
+# Reward (kept at 0 for external configuration)
+var reward: float = 0.0
+
 func _ready():
-    _initialize_network()
+    # Load model if exists
+    if FileAccess.file_exists(MODEL_FILE_PATH):
+        _load_model()
+    else:
+        _initialize_network()
 
 func _initialize_network():
-    # Initialize weights and biases for each layer
+    weights.clear()
+    biases.clear()
     var layer_input_size = input_size
     for size in layer_sizes:
         weights.append(_create_matrix(size, layer_input_size))
@@ -25,6 +36,8 @@ func _initialize_network():
     # Output layer
     weights.append(_create_matrix(output_size, layer_input_size))
     biases.append(_create_vector(output_size))
+    # Save the initialized model
+    _save_model()
 
 func _create_matrix(rows, cols):
     var matrix = []
@@ -72,17 +85,13 @@ func _relu(vec: Array) -> Array:
     return result
 
 # Set inputs
-var input_array: Array = []
-
 func set_inputs(inputs: Array):
     if inputs.size() != input_size:
         push_error("Input size mismatch")
     else:
         input_array = inputs
 
-# Set reward function (can be used externally)
-var reward: float = 0.0
-
+# Set reward (can be used externally)
 func set_reward(r: float):
     reward = r
 
@@ -92,3 +101,28 @@ func get_output() -> Array:
         push_error("Inputs not set")
         return []
     return predict(input_array)
+
+# Save model weights and biases to file
+func _save_model():
+    var data = {
+        "weights": weights,
+        "biases": biases
+    }
+    var file = FileAccess.open(MODEL_FILE_PATH, FileAccess.WRITE)
+    if file:
+        file.store_string(to_json(data))
+        file.close()
+
+# Load model weights and biases from file
+func _load_model():
+    var file = FileAccess.open(MODEL_FILE_PATH, FileAccess.READ)
+    if file:
+        var json_str = file.get_as_text()
+        var data = parse_json(json_str)
+        if data and data.has("weights") and data.has("biases"):
+            weights = data["weights"]
+            biases = data["biases"]
+        else:
+            push_error("Invalid model file, reinitializing network")
+            _initialize_network()
+        file.close()
