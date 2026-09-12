@@ -1,0 +1,60 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LocalPlayer = Players.LocalPlayer
+local HumanoidRootPart = (LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()):WaitForChild("HumanoidRootPart")
+local SpawnedInToys = workspace:WaitForChild(LocalPlayer.Name .. "SpawnedInToys")
+local Grass = workspace.Map.BaseGround:GetDescendants()
+
+local UsedShurks = {}
+
+for _, pos in ipairs({
+    Vector3.new(107.5, -101.350403, 43.3749657),
+    Vector3.new(-9.50007629, -101.350403, -76.625),
+    Vector3.new(90.5, -101.350403, -76.625),
+}) do
+    local target, dist = nil, math.huge
+
+    -- to find all grass close to spawn point unc
+    for _, obj in ipairs(Grass) do
+        if obj:IsA("BasePart") and obj.Name == "Grass" and not UsedShurks[obj] then
+            local d = (obj.Position - pos).Magnitude
+            if d < dist then
+                target, dist = obj, d
+            end
+        end
+    end
+
+    if target then
+        UsedShurks[target] = true
+
+        local shuriken, conn
+        conn = SpawnedInToys.ChildAdded:Connect(function(child)
+            if child.Name == "NinjaShuriken" or child.Name:find("Shuriken") then
+                shuriken = child
+                conn:Disconnect()
+            end
+        end)
+
+        if LocalPlayer:FindFirstChild("CanSpawnToy") and not LocalPlayer.CanSpawnToy.Value then
+            LocalPlayer.CanSpawnToy.Changed:Wait()
+        end
+
+        task.spawn(function()
+            ReplicatedStorage.MenuToys.SpawnToyRemoteFunction:InvokeServer("NinjaShuriken", HumanoidRootPart.CFrame * CFrame.new(5, 10, 20), Vector3.new())
+        end)
+
+        repeat task.wait() until shuriken
+        local sticky = shuriken:WaitForChild("StickyPart")
+
+        for i = 1, 30 do
+            ReplicatedStorage.GrabEvents.SetNetworkOwner:FireServer(sticky, sticky.CFrame)
+            if sticky:FindFirstChild("PartOwner") and sticky.PartOwner.Value == LocalPlayer.Name then
+                break
+            end
+            task.wait()
+        end
+
+        ReplicatedStorage.PlayerEvents.StickyPartEvent:FireServer(sticky, target, CFrame.new(1e12, 1e12, 1e12)) -- el spawn point be like: why u bulleh meh 
+    end
+end
