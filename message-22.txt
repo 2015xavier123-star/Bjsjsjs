@@ -1,0 +1,363 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer = Players.LocalPlayer
+
+local GrabEventsFolder = ReplicatedStorage:WaitForChild("GrabEvents", 10)
+
+local RemoteEventHandler = {
+	SetNetworkOwner = GrabEventsFolder and GrabEventsFolder:WaitForChild("SetNetworkOwner", 5),
+	DestroyGrabLine = GrabEventsFolder and GrabEventsFolder:WaitForChild("DestroyGrabLine", 5),
+}
+
+local Success, Rayfield = pcall(function()
+	return loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+end)
+
+if not Success or not Rayfield then
+	warn("Failed to load Rayfield UI library.")
+	return
+end
+
+local Window = Rayfield:CreateWindow({
+	Name = "Anti-Grab Manager",
+	LoadingTitle = "Loading Manager...",
+	LoadingSubtitle = "by user",
+	ConfigurationSaving = {
+		Enabled = false
+	}
+})
+
+local Tab = Window:CreateTab("Settings", 4483362458)
+
+local NetworkManager = {}
+
+function NetworkManager.AttemptNetworkShip(part)
+	if not part or not part.Parent then
+		return false
+	end
+
+	local partOwner = part:FindFirstChild("PartOwner")
+	if partOwner and partOwner.Value == LocalPlayer.Name then
+		return true
+	end
+
+	local character = LocalPlayer.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root then
+		return false
+	end
+
+	if RemoteEventHandler.SetNetworkOwner then
+		pcall(function()
+			RemoteEventHandler.SetNetworkOwner:FireServer(part, CFrame.lookAt(root.Position, part.Position))
+		end)
+	end
+
+	for _ = 1, 5 do
+		task.wait()
+		local po = part:FindFirstChild("PartOwner")
+		if po and po.Value == LocalPlayer.Name then
+			return true
+		end
+	end
+
+	return false
+end
+
+local AntiGrabManager = {
+	active_managers = setmetatable({}, { __mode = "k" }),
+	default = {
+		anti_grab = true,
+	},
+}
+AntiGrabManager.__index = AntiGrabManager
+
+function AntiGrabManager:AttemptNetworkShip(part)
+	NetworkManager.AttemptNetworkShip(part)
+end
+
+function AntiGrabManager:AntiGrabPlayer(character)
+	if self.anti_grab_conn then
+		self.anti_grab_conn:Disconnect()
+		self.anti_grab_conn = nil
+	end
+	if self.reset_conn then
+		self.reset_conn:Disconnect()
+		self.reset_conn = nil
+	end
+
+	local hrp = character:WaitForChild("HumanoidRootPart", 5)
+	if not hrp then
+		return
+	end
+
+	local targetHumanoid = character:FindFirstChildOfClass("Humanoid")
+	if not targetHumanoid then
+		return
+	end
+
+	self.grab_fired = false
+
+	self.anti_grab_conn = character.DescendantAdded:Connect(function(child)
+		if not self.anti_grab then
+			return
+		end
+
+		if not (child:IsA("StringValue") and child.Name == "PartOwner" and child.Value) then
+			return
+		end
+
+		local grabbedPart = child.Parent
+		if not grabbedPart or not grabbedPart:IsA("BasePart") then
+			return
+		end
+
+		local grabber = Players:FindFirstChild(child.Value)
+		if not grabber or not grabber.Character then
+			return
+		end
+
+		local grabberHumanoid = grabber.Character:FindFirstChildOfClass("Humanoid")
+		if not grabberHumanoid then
+			return
+		end
+
+		if self.grab_fired then
+			return
+		end
+		self.grab_fired = true
+
+		local localChar = LocalPlayer.Character
+		local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
+		if localRoot and hrp and hrp.Parent then
+			localChar:PivotTo(hrp.CFrame)
+		end
+
+		task.wait(0.1)
+
+		self:AttemptNetworkShip(hrp)
+
+		if RemoteEventHandler.DestroyGrabLine then
+			RemoteEventHandler.DestroyGrabLine:FireServer(grabbedPart)
+		end
+	end)
+
+	self.reset_conn = character.DescendantRemoving:Connect(function(removing)
+		if removing:IsA("StringValue") and removing.Name == "PartOwner" then
+			self.grab_fired = false
+		end
+	end)
+	
+	table.insert(self.conns, self.reset_conn)
+	table.insert(self.conns, self.anti_grab_conn)
+end
+
+function AntiGrabManager:OnDied(character)
+	if not character then
+		return
+	end
+
+	local humanoid = character:WaitForChild("Humanoid", 5)
+	if not humanoid then
+		return
+	end
+
+	self.died_conn = humanoid.Died:Once(function()
+		if self.anti_grab_conn then
+			self.anti_grab_conn:Disconnect()
+			self.anti_grab_conn = nil
+		end
+	end)
+
+	table.insert(self.conns, self.died_conn)
+end
+
+function AntiGrabManager:SetUp(character)
+	if not character then
+		return
+	end
+
+	self:OnDied(character)
+	self:AntiGrabPlayer(character)
+end
+
+function AntiGrabManager:UnHookPlayer()
+	if self.conns then
+		for _, conn in ipairs(self.conns) do
+			if conn then
+				conn:Disconnect()
+			end
+		end
+	end
+
+	self.conns = nil
+	AntiGrabManager.active_managers[self.player] = nil
+	self.player = nil
+
+	setmetatable(self, nil)
+end
+
+function AntiGrabManager:HookPlayer()
+	local targetPlayer = self.player
+
+	if not targetPlayer.Character then
+		targetPlayer.CharacterAdded:Wait()
+	end
+
+	self:SetUp(targetPlayer.Character)
+
+	self.root_conn = targetPlayer.CharacterAdded:Connect(function(newCharacter)
+		self:SetUp(newCharacter)
+	end)
+	table.insert(self.conns, self.root_conn)
+
+	self.player_left = Players.PlayerRemoving:Connect(function(leavingPlayer)
+		if leavingPlayer ~= targetPlayer then
+			return
+		end
+
+		self:UnHookPlayer()
+	end)
+	table.insert(self.conns, self.player_left)
+end
+
+function AntiGrabManager.new(targetPlayer)
+	if AntiGrabManager.active_managers[targetPlayer] then
+		return AntiGrabManager.active_managers[targetPlayer]
+	end
+
+	local self = setmetatable({
+		anti_grab = AntiGrabManager.default.anti_grab,
+		player = targetPlayer,
+		conns = {},
+	}, AntiGrabManager)
+
+	AntiGrabManager.active_managers[targetPlayer] = self
+	self:HookPlayer()
+
+	return self
+end
+
+local function getPlayerList()
+	local list = {}
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LocalPlayer then
+			table.insert(list, p.Name)
+		end
+	end
+
+	if #list == 0 then
+		table.insert(list, "None")
+	end
+
+	return list
+end
+
+local selectedPlayerName = nil
+
+local PlayerDropdown = Tab:CreateDropdown({
+	Name = "Select Player to Target",
+	Options = getPlayerList(),
+	CurrentOption = "None",
+	Flag = "SelectedPlayerDropdown",
+	Callback = function(Option)
+		if type(Option) == "table" then
+			selectedPlayerName = Option[1]
+		else
+			selectedPlayerName = Option
+		end
+	end,
+})
+
+Players.PlayerAdded:Connect(function()
+	PlayerDropdown:Refresh(getPlayerList())
+end)
+
+Players.PlayerRemoving:Connect(function()
+	PlayerDropdown:Refresh(getPlayerList())
+end)
+
+Tab:CreateToggle({
+	Name = "Anti-Grab Active",
+	CurrentValue = true,
+	Flag = "AntiGrabToggle",
+	Callback = function(Value)
+		AntiGrabManager.default.anti_grade = Value
+		for _, manager in pairs(AntiGrabManager.active_managers) do
+			manager.anti_grab = Value
+		end
+	end,
+})
+
+Tab:CreateButton({
+	Name = "Trigger Selected Player Manager",
+	Callback = function()
+		if selectedPlayerName and selectedPlayerName ~= "None" then
+			local targetPlayer = Players:FindFirstChild(selectedPlayerName)
+			if targetPlayer then
+				AntiGrabManager.new(targetPlayer)
+
+				Rayfield:Notify({
+					Title = "Success",
+					Content = "Anti-grab manager hooked to " .. targetPlayer.Name,
+					Duration = 3,
+				})
+			end
+		end
+	end,
+})
+
+local grabDebounce = false
+
+Tab:CreateButton({
+	Name = "Grab Selected Player",
+	Callback = function()
+		if grabDebounce then
+			return
+		end
+
+		if not selectedPlayerName or selectedPlayerName == "None" then
+			Rayfield:Notify({
+				Title = "Error",
+				Content = "No player selected.",
+				Duration = 3,
+			})
+			return
+		end
+
+		local targetPlayer = Players:FindFirstChild(selectedPlayerName)
+		if not targetPlayer or not targetPlayer.Character then
+			return
+		end
+
+		local targetChar = targetPlayer.Character
+		local targetHrp = targetChar:FindFirstChild("HumanoidRootPart")
+		local targetHumanoid = targetChar:FindFirstChildOfClass("Humanoid")
+
+		if not targetHrp or not targetHumanoid then
+			return
+		end
+
+		grabDebounce = true
+
+		local localChar = LocalPlayer.Character
+		local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
+		if localRoot then
+			localChar:PivotTo(targetHrp.CFrame)
+		end
+
+		task.wait(0.1)
+
+		NetworkManager.AttemptNetworkShip(targetHrp)
+
+		Rayfield:Notify({
+			Title = "Success",
+			Content = "Grabbed " .. targetPlayer.Name,
+			Duration = 3,
+		})
+
+		task.wait(1)
+		grabDebounce = false
+	end,
+})
