@@ -1,0 +1,90 @@
+local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/jensonhirst/Orion/main/source')))()
+loadstring(game:HttpGet(('https://raw.githubusercontent.com/2015xavier123-star/My-mod-lowk/refs/heads/main/anti_grab_ghost_script.txt')))()
+
+local antiExplodeT = true
+
+local function antiExplodeF()
+	antiExplodeT = true
+	local char = Player.Character
+	if not char then
+		return
+	end
+	local hrp = char:WaitForChild("HumanoidRootPart")
+	workspace.ChildAdded:Connect(function(model)
+		if model.Name == "Part" and antiExplodeT then
+			local mag = (model.Position - hrp.Position).Magnitude
+			if mag <= 10 then
+				hrp.Anchored = true
+				wait(0.01)
+				while char["Right Arm"].RagdollLimbPart.CanCollide do
+					wait(0.001)
+				end
+				hrp.Anchored = false
+			end
+		end
+	end)
+end
+
+local Window = OrionLib:MakeWindow({
+    Name = "Main script | AI SIMP", 
+    HidePremium = false, 
+    SaveConfig = true, 
+    ConfigFolder = "OrionTest"
+})
+
+
+
+local AntisTab = Window:MakeTab({
+    Name = "Antis",
+    Icon = "rbxassetid://111176085924966",
+    PremiumOnly = false
+})
+
+local Rndm = Window:MakeTab({
+    Name = "Essentials",
+    Icon = "rbxassetid://5009915812",
+    PremiumOnly = false
+})
+
+AntisTab:AddToggle({
+    Name = "Antigrab",
+    Default = false,
+    Callback = function(Value)
+        SETTINGS_ANTI_GRAB = Value
+    end    
+})
+
+AntisTab:AddToggle({
+    Name = "Anti explode (WIP)",
+    Default = false,
+    Callback = function(Value)
+        antiExplodeT = Value
+    end    
+})
+
+Rndm:AddToggle({
+    Name = "Enable void",
+    Default = true,
+    Callback = function(Value)
+        game.workspace.FallHeightEnabled = Value
+    end    
+})
+ 
+Rndm:AddButton({
+    Name = "Tsunami",
+    Callback = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/2015xavier123-star/Bjsjsjs/refs/heads/main/tsunami.lua"))()
+    end
+})
+
+Rndm:AddButton({
+    Name =  "Grab all",
+    Callback = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/2015xavier123-star/Bjsjsjs/refs/heads/main/Test.lua"))()
+
+    end
+})
+
+
+
+OrionLib:Init()
