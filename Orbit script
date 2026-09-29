@@ -1,0 +1,173 @@
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+
+-- Target folders and events (UPDATED TO PLOT2)
+local plotFolder = Workspace:WaitForChild("PlotItems"):WaitForChild("Plot2")
+local grabEvents = ReplicatedStorage:WaitForChild("GrabEvents")
+local setNetworkOwner = grabEvents:WaitForChild("SetNetworkOwner")
+
+-- CORE LAYOUT CONFIGURATION
+local SHAPE_RADIUS = 5        
+local VERTICAL_OFFSET = 3.5   
+local SLIDE_SPEED = 20       
+local SPIN_SPEED = 6         
+
+local currentPositions = {}  -- Tracks active target layout offsets
+local currentOrbitTarget = nil
+local activeShapeType = "Ring" -- Tracks the currently chosen shape
+
+-- ==========================================
+-- 3D SHAPE GENERATORS
+-- ==========================================
+local ShapeGenerators = {
+    ["Ring"] = function(index, total)
+        local angle = (index - 1) * (math.pi * 2 / total)
+        return Vector3.new(math.cos(angle), 0, math.sin(angle))
+    end,
+    
+    ["Cylinder"] = function(index, total)
+        local angle = (index - 1) * (math.pi * 2 / total)
+        -- Alternates layers up and down to form a vertical wall/cylinder
+        local heightOffset = (index % 2 == 0) and 0.3 or -0.3
+        return Vector3.new(math.cos(angle), heightOffset, math.sin(angle))
+    end,
+    
+    ["Sphere"] = function(index, total)
+        local goldenRatio = (1 + 5 ^ 0.5) / 2
+        local t = (index - 1) / total
+        local inclination = math.acos(1 - 2 * t)
+        local azimuth = 2 * math.pi * index / goldenRatio
+        return Vector3.new(
+            math.sin(inclination) * math.cos(azimuth),
+            math.cos(inclination),
+            math.sin(inclination) * math.sin(azimuth)
+        )
+    end,
+    
+    ["Dual-Ring Orbit"] = function(index, total)
+        local half = math.ceil(total / 2)
+        if index <= half then
+            local angle = (index - 1) * (math.pi * 2 / half)
+            return Vector3.new(math.cos(angle), 0, math.sin(angle))
+        else
+            local angle = (index - half - 1) * (math.pi * 2 / (total - half))
+            -- Creates a perpendicular vertical ring crossing through the flat ring
+            return Vector3.new(0, math.cos(angle), math.sin(angle))
+        end
+    end
+}
+
+local shapeList = {"Ring", "Cylinder", "Sphere", "Dual-Ring Orbit"}
+
+-- Physics claim function to trick FE Network Ownership
+local function claimOwnership(part)
+    if part:IsA("BasePart") and not part.Anchored then
+        part.Velocity = Vector3.new(0, 0.01, 0) 
+    end
+end
+
+-- Shortened/Partial Name Target Finder
+local function findPlayerByName(searchString)
+    searchString = string.lower(searchString)
+    for _, p in ipairs(Players:GetPlayers()) do
+        if string.find(string.lower(p.DisplayName), searchString) or string.find(string.lower(p.Name), searchString) then
+            return p
+        end
+    end
+    return nil
+end
+
+-- Main calculation loop
+RunService.RenderStepped:Connect(function(deltaTime)
+    local targetUser = currentOrbitTarget or player
+    local character = targetUser.Character
+    if not character then return end
+    
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    
+    local sparklers = plotFolder:GetChildren()
+    table.sort(sparklers, function(a, b) return a.Name < b.Name end)
+    
+    local totalSparklers = #sparklers
+    if totalSparklers == 0 then return end
+    
+    local centerPos = hrp.Position + Vector3.new(0, VERTICAL_OFFSET, 0)
+    local timeFactor = os.clock() * SPIN_SPEED
+    local rotationCFrame = CFrame.fromEulerAnglesXYZ(timeFactor * 0.2, timeFactor, timeFactor * 0.1)
+    
+    for index, sparkler in ipairs(sparklers) do
+        local targetPart = sparkler:IsA("Model") and sparkler.PrimaryPart or sparkler
+        if not targetPart then continue end
+        
+        -- Compute base structural vector using our random active layout preset
+        local generator = ShapeGenerators[activeShapeType] or ShapeGenerators["Ring"]
+        local targetUnitVector = generator(index, totalSparklers)
+        
+        if not currentPositions[sparkler] then
+            currentPositions[sparkler] = targetUnitVector
+        end
+        
+        -- Slide transitions across the coordinates smoothly
+        local smoothVector = currentPositions[sparkler]:Lerp(targetUnitVector, math.clamp(deltaTime * SLIDE_SPEED, 0, 1))
+        if smoothVector.Magnitude > 0 then
+            currentPositions[sparkler] = smoothVector.Unit
+        end
+        
+        -- Translate unit vectors into world rotation offsets around the player's head
+        local rotatedPoint = rotationCFrame:VectorToWorldSpace(currentPositions[sparkler])
+        local finalPosition = centerPos + (rotatedPoint * SHAPE_RADIUS)
+        local finalCFrame = CFrame.new(finalPosition)
+        
+        -- Set network transformation coordinates on the server
+        setNetworkOwner:FireServer(sparkler, finalCFrame)
+        
+        -- Apply visual spatial physics parameters locally
+        if sparkler:IsA("Model") then
+            for _, child in ipairs(sparkler:GetDescendants()) do
+                claimOwnership(child)
+            end
+            sparkler:PivotTo(finalCFrame)
+        elseif sparkler:IsA("BasePart") then
+            claimOwnership(sparkler)
+            sparkler.CFrame = finalCFrame
+        end
+    end
+    
+    for sparkler in pairs(currentPositions) do
+        if not plotFolder:FindFirstChild(sparkler.Name) then
+            currentPositions[sparkler] = nil
+        end
+    end
+end)
+
+-- Local player chat logic processing commands
+player.Chatted:Connect(function(message)
+    local words = {}
+    for word in string.gmatch(message, "%S+") do
+        table.insert(words, word)
+    end
+    
+    if #words > 0 then
+        local command = string.lower(words[1])
+        
+        if command == "halo" and words[2] then
+            table.remove(words, 1)
+            local searchName = table.concat(words, " ")
+            local foundPlayer = findPlayerByName(searchName)
+            
+            if foundPlayer then
+                currentOrbitTarget = foundPlayer
+                -- Pick a random 3D layout shape every time you fire a new command
+                activeShapeType = shapeList[math.random(1, #shapeList)]
+            end
+        elseif command == "unhalo" then
+            currentOrbitTarget = nil
+            activeShapeType = "Ring"
+        end
+    end
+end)
