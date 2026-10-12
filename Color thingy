@@ -1,0 +1,50 @@
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Locate the remote event
+local DataEvents = ReplicatedStorage:WaitForChild("DataEvents", 5)
+local Event = DataEvents and DataEvents:WaitForChild("UpdateLineColorsEvent", 5)
+
+if not Event then
+    warn("UpdateLineColorsEvent could not be found!")
+    return
+end
+
+local hue = 0
+local speed = 0.1 -- Adjust this number to change how fast the rainbow cycles (higher = faster)
+
+-- Fires every frame
+RunService.Heartbeat:Connect(function(deltaTime)
+    -- Progress the color spectrum smoothly over time
+    hue = (hue + (deltaTime * speed)) % 1
+    
+    -- Generate the current rainbow color (Full saturation and value)
+    local rainbowColor = Color3.fromHSV(hue, 1, 1)
+    
+    -- Construct the uniform ColorSequence
+    local sequence = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, rainbowColor),
+        ColorSequenceKeypoint.new(0.125, rainbowColor),
+        ColorSequenceKeypoint.new(0.25, rainbowColor),
+        ColorSequenceKeypoint.new(0.375, rainbowColor),
+        ColorSequenceKeypoint.new(0.5, rainbowColor),
+        ColorSequenceKeypoint.new(0.625, rainbowColor),
+        ColorSequenceKeypoint.new(0.75, rainbowColor),
+        ColorSequenceKeypoint.new(0.875, rainbowColor),
+        ColorSequenceKeypoint.new(1, rainbowColor)
+    })
+    
+    -- Fire the event with the sequence and 9 identical color arguments
+    Event:FireServer(
+        sequence,
+        rainbowColor,
+        rainbowColor,
+        rainbowColor,
+        rainbowColor,
+        rainbowColor,
+        rainbowColor,
+        rainbowColor,
+        rainbowColor,
+        rainbowColor
+    )
+end)
